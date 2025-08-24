@@ -42,10 +42,10 @@ jobs:
           }
           & "${env:VCPKG_ROOT}\vcpkg.exe" version
 
-      - name: Instalar deps nativas (libyuv/libvpx) via vcpkg
+      - name: Instalar deps nativas via vcpkg
         shell: pwsh
         run: |
-          & "${env:VCPKG_ROOT}\vcpkg.exe" install libyuv:${env:VCPKG_DEFAULT_TRIPLET} libvpx:${env:VCPKG_DEFAULT_TRIPLET}
+          & "${env:VCPKG_ROOT}\vcpkg.exe" install
 
       - name: Garantir submódulos (hbb_common etc.)
         shell: pwsh
