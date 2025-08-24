@@ -1,47 +1,56 @@
 name: Build RustDesk Windows
-
 on:
-  workflow_dispatch:   # dispara manualmente no GitHub
-  push:                # opcional, dispara a cada push
-    branches: [ main ]
+  workflow_dispatch:
+  push:
+    branches: [ master ]
 
 jobs:
   build:
     runs-on: windows-2022
-
+    env:
+      VCPKG_ROOT: ${{ runner.temp }}\vcpkg
+      VCPKG_DEFAULT_TRIPLET: x64-windows-static
+      CMAKE_TOOLCHAIN_FILE: ${{ runner.temp }}\vcpkg\scripts\buildsystems\vcpkg.cmake
     steps:
-      - name: Checkout código
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Instalar Rust
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Instalar LLVM/Clang
+      - name: Install LLVM/Clang
         run: choco install llvm --yes
 
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
+      # (Opcional) Cache do vcpkg pra acelerar re-builds
+      - name: Cache vcpkg
+        uses: actions/cache@v4
         with:
-          vcpkgGitCommitId: master
+          path: |
+            ${{ env.VCPKG_ROOT }}\installed
+            C:\Users\runneradmin\AppData\Local\vcpkg\archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('.github/workflows/vcpkg-packages.txt') }}
 
-      - name: Instalar libs necessárias
+      - name: Setup vcpkg (manual)
+        shell: pwsh
         run: |
-          vcpkg install libyuv:x64-windows-static
-          vcpkg install libvpx:x64-windows-static
-          vcpkg install openssl:x64-windows-static
-          vcpkg install sdl2:x64-windows-static
-          vcpkg install opus:x64-windows-static
-          vcpkg install libpng:x64-windows-static
+          git clone https://github.com/microsoft/vcpkg $env:VCPKG_ROOT
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat"
+          & "$env:VCPKG_ROOT\vcpkg.exe" integrate install
 
-      - name: Build release
+      - name: Install deps (libyuv, libvpx, openssl, sdl2, opus, libpng)
+        shell: pwsh
+        run: |
+          Get-Content ".github/workflows/vcpkg-packages.txt" | ForEach-Object {
+            & "$env:VCPKG_ROOT\vcpkg.exe" install $_
+          }
+
+      - name: Build (release)
         env:
-          VCPKG_DEFAULT_TRIPLET: x64-windows-static
-          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake
+          RUSTFLAGS: -C target-feature=+crt-static
         run: cargo build --release -vv
 
-      - name: Upload artefatos
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: rustdesk-win
