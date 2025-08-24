@@ -1,18 +1,13 @@
 name: Build RustDesk Windows
 on:
   workflow_dispatch:
-  push:
-    branches: [ master ]
 
 jobs:
   build:
     runs-on: windows-2022
-    env:
-      VCPKG_ROOT: ${{ runner.temp }}\vcpkg
-      VCPKG_DEFAULT_TRIPLET: x64-windows-static
-      CMAKE_TOOLCHAIN_FILE: ${{ runner.temp }}\vcpkg\scripts\buildsystems\vcpkg.cmake
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -22,36 +17,32 @@ jobs:
       - name: Install LLVM/Clang
         run: choco install llvm --yes
 
-      # (Opcional) Cache do vcpkg pra acelerar re-builds
-      - name: Cache vcpkg
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.VCPKG_ROOT }}\installed
-            C:\Users\runneradmin\AppData\Local\vcpkg\archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('.github/workflows/vcpkg-packages.txt') }}
-
-      - name: Setup vcpkg (manual)
+      - name: Setup vcpkg + deps (KISS)
         shell: pwsh
         run: |
-          git clone https://github.com/microsoft/vcpkg $env:VCPKG_ROOT
-          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat"
-          & "$env:VCPKG_ROOT\vcpkg.exe" integrate install
-
-      - name: Install deps (libyuv, libvpx, openssl, sdl2, opus, libpng)
-        shell: pwsh
-        run: |
-          Get-Content ".github/workflows/vcpkg-packages.txt" | ForEach-Object {
-            & "$env:VCPKG_ROOT\vcpkg.exe" install $_
-          }
+          git clone https://github.com/microsoft/vcpkg C:\vcpkg
+          C:\vcpkg\bootstrap-vcpkg.bat
+          C:\vcpkg\vcpkg.exe integrate install
+          C:\vcpkg\vcpkg.exe install `
+            libyuv:x64-windows-static `
+            libvpx:x64-windows-static `
+            openssl:x64-windows-static `
+            sdl2:x64-windows-static `
+            opus:x64-windows-static `
+            libpng:x64-windows-static
 
       - name: Build (release)
         env:
+          VCPKG_DEFAULT_TRIPLET: x64-windows-static
+          CMAKE_TOOLCHAIN_FILE: C:\vcpkg\scripts\buildsystems\vcpkg.cmake
           RUSTFLAGS: -C target-feature=+crt-static
         run: cargo build --release -vv
 
-      - name: Upload artifacts
+      - name: Upload artifacts (.exe)
         uses: actions/upload-artifact@v4
         with:
           name: rustdesk-win
-          path: target\release\*.exe
+          path: |
+            target\release\rustdesk*.exe
+            target\release\hbbs*.exe
+            target\release\hbbr*.exe
