@@ -1,0 +1,6 @@
+libyuv:x64-windows-static
+libvpx:x64-windows-static
+openssl:x64-windows-static
+sdl2:x64-windows-static
+opus:x64-windows-static
+libpng:x64-windows-static
