@@ -1,0 +1,48 @@
+name: Build RustDesk Windows
+
+on:
+  workflow_dispatch:   # dispara manualmente no GitHub
+  push:                # opcional, dispara a cada push
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Instalar Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Instalar LLVM/Clang
+        run: choco install llvm --yes
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: master
+
+      - name: Instalar libs necessárias
+        run: |
+          vcpkg install libyuv:x64-windows-static
+          vcpkg install libvpx:x64-windows-static
+          vcpkg install openssl:x64-windows-static
+          vcpkg install sdl2:x64-windows-static
+          vcpkg install opus:x64-windows-static
+          vcpkg install libpng:x64-windows-static
+
+      - name: Build release
+        env:
+          VCPKG_DEFAULT_TRIPLET: x64-windows-static
+          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake
+        run: cargo build --release -vv
+
+      - name: Upload artefatos
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdesk-win
+          path: target\release\*.exe
