@@ -5,6 +5,11 @@ on:
 jobs:
   build:
     runs-on: windows-2022
+    env:
+      VCPKG_ROOT: C:\vcpkg
+      VCPKG_DEFAULT_TRIPLET: x64-windows-static
+      CMAKE_TOOLCHAIN_FILE: C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,24 +22,26 @@ jobs:
       - name: Install LLVM/Clang
         run: choco install llvm --yes
 
-      - name: Setup vcpkg + deps (KISS)
+      - name: Setup vcpkg (manifest mode)
         shell: pwsh
         run: |
-          git clone https://github.com/microsoft/vcpkg C:\vcpkg
-          C:\vcpkg\bootstrap-vcpkg.bat
-          C:\vcpkg\vcpkg.exe integrate install
-          C:\vcpkg\vcpkg.exe install `
-            libyuv:x64-windows-static `
-            libvpx:x64-windows-static `
-            openssl:x64-windows-static `
-            sdl2:x64-windows-static `
-            opus:x64-windows-static `
-            libpng:x64-windows-static
+          if (!(Test-Path 'C:\vcpkg\.git')) {
+            git clone https://github.com/microsoft/vcpkg C:\vcpkg
+            & 'C:\vcpkg\bootstrap-vcpkg.bat'
+          } else {
+            Write-Host 'vcpkg já presente em C:\vcpkg'
+          }
+          & 'C:\vcpkg\vcpkg.exe' integrate install
+
+      - name: vcpkg install (usa vcpkg.json do projeto)
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          if (!(Test-Path '.\vcpkg.json')) { Write-Error 'vcpkg.json não encontrado na raiz do repo'; exit 1 }
+          & 'C:\vcpkg\vcpkg.exe' install --triplet x64-windows-static
 
       - name: Build (release)
         env:
-          VCPKG_DEFAULT_TRIPLET: x64-windows-static
-          CMAKE_TOOLCHAIN_FILE: C:\vcpkg\scripts\buildsystems\vcpkg.cmake
           RUSTFLAGS: -C target-feature=+crt-static
         run: cargo build --release -vv
 
@@ -42,7 +49,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rustdesk-win
-          path: |
-            target\release\rustdesk*.exe
-            target\release\hbbs*.exe
-            target\release\hbbr*.exe
+          path: target\release\*.exe
