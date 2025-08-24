@@ -1,52 +1,107 @@
-name: Build RustDesk Windows
+name: Build RustDesk (Windows)
+
 on:
   workflow_dispatch:
+  push:
+    branches: [ main, master ]
+  pull_request:
 
 jobs:
-  build:
-    runs-on: windows-2022
+  build-windows:
+    runs-on: windows-latest
+
     env:
+      # Caminhos e triplet do vcpkg
       VCPKG_ROOT: C:\vcpkg
       VCPKG_DEFAULT_TRIPLET: x64-windows-static
-      CMAKE_TOOLCHAIN_FILE: C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+      # Clang para bindgen/cc
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
+      # Evitar problemas de path longo no git do runner
+      GIT_REDIRECT_STDERR: 2>nul
 
     steps:
-      - name: Checkout
+      - name: Checkout (com submódulos)
         uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          submodules: recursive
+          fetch-depth: 0
+          lfs: true
 
-      - name: Install LLVM/Clang
-        run: choco install llvm --yes
+      - name: Habilitar long paths do Git
+        shell: pwsh
+        run: git config --global core.longpaths true
 
-      - name: Setup vcpkg (manifest mode)
+      # Opcional: cache do cargo para acelerar builds subsequentes
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\Users\runneradmin\.cargo\registry
+            C:\Users\runneradmin\.cargo\git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      # Cache do vcpkg (installed + downloads)
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\downloads
+          key: vcpkg-${{ runner.os }}-x64-static-${{ hashFiles('.github/workflows/build-windows.yml') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-x64-static-
+
+      - name: Instalar LLVM (Clang) via winget
         shell: pwsh
         run: |
-          if (!(Test-Path 'C:\vcpkg\.git')) {
-            git clone https://github.com/microsoft/vcpkg C:\vcpkg
-            & 'C:\vcpkg\bootstrap-vcpkg.bat'
-          } else {
-            Write-Host 'vcpkg já presente em C:\vcpkg'
+          winget install -e --id LLVM.LLVM --silent
+          if (-not (Test-Path "C:\Program Files\LLVM\bin\clang.exe")) {
+            Write-Error "LLVM/Clang não encontrado após instalação."
           }
-          & 'C:\vcpkg\vcpkg.exe' integrate install
 
-      - name: vcpkg install (usa vcpkg.json do projeto)
+      - name: Bootstrap do vcpkg
         shell: pwsh
-        working-directory: ${{ github.workspace }}
         run: |
-          if (!(Test-Path '.\vcpkg.json')) { Write-Error 'vcpkg.json não encontrado na raiz do repo'; exit 1 }
-          & 'C:\vcpkg\vcpkg.exe' install --triplet x64-windows-static
+          if (-not (Test-Path "C:\vcpkg\vcpkg.exe")) {
+            git clone https://github.com/microsoft/vcpkg C:\vcpkg
+            C:\vcpkg\bootstrap-vcpkg.bat
+          }
+          C:\vcpkg\vcpkg.exe version
 
-      - name: Build (release)
-        env:
-          RUSTFLAGS: -C target-feature=+crt-static
+      - name: Instalar dependências C/C++ (estáticas) via vcpkg
+        shell: pwsh
+        run: |
+          # libs requeridas pelo crate scrap (yuv e vpx)
+          C:\vcpkg\vcpkg.exe install libyuv:x64-windows-static libvpx:x64-windows-static
+
+      - name: Verificar submódulo hbb_common
+        shell: pwsh
+        run: |
+          if (-not (Test-Path ".\libs\hbb_common\Cargo.toml")) {
+            Write-Host "Submódulos parecem incompletos. Forçando update..."
+            git submodule sync --recursive
+            git submodule update --init --recursive
+          }
+          if (-not (Test-Path ".\libs\hbb_common\Cargo.toml")) {
+            Get-ChildItem -Recurse -Depth 2 libs | Out-Host
+            Write-Error "ERRO: libs\\hbb_common\\Cargo.toml ainda não existe."
+          }
+
+      - name: Instalar toolchain Rust (MSVC)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build (release, verbose)
+        shell: pwsh
         run: cargo build --release -vv
 
-      - name: Upload artifacts (.exe)
+      - name: Publicar artefatos (.exe)
         uses: actions/upload-artifact@v4
         with:
-          name: rustdesk-win
-          path: target\release\*.exe
+          name: rustdesk-windows-release
+          path: |
+            target\release\*.exe
+            target\release\*.pdb
+          if-no-files-found: warn
